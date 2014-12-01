@@ -42,11 +42,12 @@ class Render {
 			'setupWelcome'=>array(
 				'title'=>'Распаковка',
 				'steps'=>array(
-					'unpack'
+					'unpack',
+					'MODXSetup'
 				)
 			),
-			'importDump'=>'Импорт архива базы',
-			'reset'=>'Заново'
+			'undumpDB'=>'Импорт архива базы',
+			'goodby'=>'Выполнено'
 		);
 		$result='';
 		foreach($arMenu as $key=>$title) {
@@ -78,7 +79,7 @@ class Render {
 		$name=$id.'['.$key.']';
 		$id='field'.hash('crc32b',$name);
 		$result='<div class="form-group"><label for="'.$id.'" class="col-sm-2 control-label">'.$form->getAttributeLabel($key).'</label><div class="col-sm-10">'.
-'<input type="text" class="form-control" id="'.$id.'" value="'.$form->$key.'" name="'.$name.'"></div></div>';
+			'<input type="text" class="form-control" id="'.$id.'" value="'.$form->$key.'" name="'.$name.'"></div></div>';
 		return $result;
 	}
 
@@ -88,6 +89,15 @@ class Render {
 		$id='field'.hash('crc32b',$name);
 		$result='<div class="form-group"><label for="'.$id.'" class="col-sm-2 control-label">'.$form->getAttributeLabel($key).'</label><div class="col-sm-10">'.
 			'<textarea class="form-control" id="'.$id.'" name="'.$name.'">'.htmlentities($form->$key,ENT_QUOTES,'utf-8',false).'</textarea></div></div>';
+		return $result;
+	}
+
+	public function getCheckboxField(Form $form,$key) {
+		$id=get_class($form);
+		$name=$id.'['.$key.']';
+		$id='field'.hash('crc32b',$name);
+		$result='<div class="form-group"><div class="col-sm-offset-2 col-sm-10"><div class="checkbox"><label><input type="checkbox" name="'.$name.'" value="1" '.($form->$key?'checked':'').'> '
+			.$form->getAttributeLabel($key).'</label></div></div></div>';
 		return $result;
 	}
 
@@ -124,12 +134,14 @@ PHP_EOT;
 			$this->header();
 		}
 		$content=str_replace(PHP_EOL,'</p><p>',$content);
-		$link=empty($nextLink)?$this->application->getStepUrl($nextStep):$nextLink;
-		$this->result.=<<<PHP_EOT
-<div class="jumbotron"><h1>{$title}</h1><p>{$content}</p>
-<p><a class="btn btn-primary btn-lg" href="{$link}" role="button">Далее</a></p>
-</div>
-PHP_EOT;
+		if(!empty($nextStep) || !empty($nextLink)) {
+			$link=empty($nextLink)?$this->application->getStepUrl($nextStep):$nextLink;
+		}
+		$this->result.='<div class="jumbotron"><h1>'.$title.'</h1><p>'.$content.'</p>';
+		if(!empty($link)) {
+			$this->result.='<p><a class="btn btn-primary btn-lg" href="'.$link.'" role="button">Далее</a></p>';
+		}
+		$this->result.='</div>';
 		$this->footer();
 		return $this;
 	}
@@ -143,6 +155,36 @@ PHP_EOT;
 		return $this;
 	}
 
+	public function iframe($url,$title='External actions',$nextStep='') {
+		$this->header();
+		$this->result.='<div class="panel panel-default"><div class="panel-heading"><h3 style="margin-top:10px;">'.$title;
+		if(!empty($nextStep)) {
+			$link=$this->application->getStepUrl($nextStep);
+			$this->result.='<a href="'.$link.'" class="btn btn-primary pull-right">Next</a>';
+		}
+		$this->result.='</h3></div><div class="panel-body">'.
+			'<iframe border="no" style="width:100%;height:100%;" src="'.$url.'" id="frameContainer"></iframe></div></div>';
+		$this->result.=<<<PHP_EOT
+<script type="text/javascript">
+$(document).ready(function(){
+	var frame=$('#frameContainer');
+	function resizeFrame() {
+		var height=$(window).innerHeight();
+		var frameHeight=frame.height();
+		var parentHeight=frame.parent().parent().height()-frameHeight;
+		frame.css('height',height-$('.navbar').outerHeight()-parentHeight-40);
+	}
+
+	$(window).resize(resizeFrame);
+
+	resizeFrame();
+});
+</script>
+PHP_EOT;
+		$this->footer();
+		return $this;
+	}
+
 	public function formWithActions(Form $form,$submitAction='',$nextStep='') {
 		if(!$this->headerRendered) {
 			$this->header();
@@ -152,7 +194,7 @@ PHP_EOT;
 		$this->result.='<div class="panel panel-default"><div class="panel-heading">'.$form->getTitle().'</div><div class="panel-body">'.
 			'<form class="form-horizontal" role="form" id="'.$formId.'" action="" method="post"><div class="alert alert-warning hidden" role="alert"></div>';
 		foreach($form->attributesNames() as $key) {
-			$type=$form->getFieldType($key);
+			$type=$form->getAttributeType($key);
 			if(method_exists($this,'get'.$type.'field')) {
 				$methodName='get'.$type.'field';
 				$this->result.=$this->$methodName($form,$key);
@@ -264,7 +306,7 @@ class Form {
 		}
 	}
 
-	public function getFieldType($field) {
+	public function getAttributeType($field) {
 		return 'text';
 	}
 
@@ -411,6 +453,106 @@ class DBDumpForm extends Form{
 	}
 }
 
+/**
+ * Class DBDumpForm creates model for mysql connection and check utility and
+ * dump utility for unpacking DB dump.
+ */
+class DBUndumpForm extends Form{
+	const DB_MODE_CONSOLE=1;
+	const DB_MODE_MYSQLI=2;
+
+	public $login;
+	public $password;
+	public $name;
+	public $host;
+
+	protected $definedMode;
+
+	/**
+	 * Method tries to connect to DB using console utilities
+	 * @return bool
+	 */
+	public function connectToConsole() {
+		exec('mysqldump --help',$output,$return);
+		if($return!=0) {
+			return false;
+		}
+		$login=escapeshellarg($this->login);
+		$password=escapeshellarg($this->password);
+		$dbname=escapeshellarg($this->name);
+		$host=escapeshellarg($this->host);
+		exec('mysql --user='.$login.' --password='.$password.' --database='.$dbname.' --host='.$host,$output,$return);
+		if($return!=0) {
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Method tries to connect to DB using mysqli functions
+	 * @return bool
+	 */
+	public function connectToMySQLi() {
+		if(!function_exists('mysqli_connect')) {
+			return false;
+		}
+		$resource=@mysqli_connect($this->host,$this->login,$this->password,$this->name);
+		if(!$resource) {
+			return false;
+		}
+		if(!@mysqli_select_db($resource,$this->name)) {
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Method checks if it can connect to DB. First it check if it could be done in
+	 * console mode (mysqldump utility) if not - checks if it can be done as mysqli connection
+	 */
+	public function check() {
+		if($this->connectToConsole()) {
+			$this->definedMode=self::DB_MODE_CONSOLE;
+			return true;
+		} elseif($this->connectToMySQLi()) {
+			$this->definedMode=self::DB_MODE_MYSQLI;
+			return true;
+		} else {
+			$this->addError('Cant connect to DB');
+		}
+		return false;
+	}
+
+	private function _dumpConsole($filename) {
+		$login=escapeshellarg($this->login);
+		$password=escapeshellarg($this->password);
+		$dbname=escapeshellarg($this->name);
+		$host=escapeshellarg($this->host);
+		$query="mysql --user={$login} --password={$password} --host={$host} --database={$dbname} < {$filename}";
+		exec($query,$output,$result);
+		if($result!=0) {
+			$this->addError('Cant import dump: '.join(PHP_EOL,$output));
+			return false;
+		}
+		return true;
+	}
+
+	private function _dumpMysql($filename) {
+		throw new Exception('Not implemented');
+		return false;
+	}
+
+	public function makeUndump($filename) {
+		if($this->definedMode==self::DB_MODE_CONSOLE) {
+			return $this->_dumpConsole($filename);
+		} elseif($this->definedMode==self::DB_MODE_MYSQLI) {
+			return $this->_dumpMysql($filename);
+		}
+		$this->addError('Wrong mode for undump process');
+		return false;
+	}
+}
+
 class ArchiveForm extends Form {
 	const MODE_CONSOLE=1;
 	const MODE_PHAR=2;
@@ -431,11 +573,11 @@ class ArchiveForm extends Form {
 		return true;
 	}
 
-	public function getFieldType($field) {
+	public function getAttributeType($field) {
 		if($field=='exclude') {
 			return 'textarea';
 		}
-		return parent::getFieldType($field);
+		return parent::getAttributeType($field);
 	}
 
 	public function connectToPhar() {
@@ -539,6 +681,10 @@ class UnpackForm extends Form {
 
 	protected $definedMode;
 
+	public function getAttributeType($attribute) {
+		return 'checkbox';
+	}
+
 	/**
 	 * Method tries to connect to DB using console utilities
 	 * @return bool
@@ -570,7 +716,7 @@ class UnpackForm extends Form {
 
 	public function _extractConsole($filename) {
 		$path=dirname($filename);
-		$query='cd '.$path.'; tar -xzf '.$filename.' 2>&1';
+		$query='cd '.$path.'; tar -xzf '.$filename.' --no-overwrite-dir 2>&1';
 		exec($query,$output,$result);
 		if($result==0) {
 			return true;
@@ -584,10 +730,17 @@ class UnpackForm extends Form {
 	}
 
 	public function makeExtract($filename) {
+		$result=false;
 		if($this->definedMode==self::MODE_CONSOLE) {
-			return $this->_extractConsole($filename);
+			$result=$this->_extractConsole($filename);
 		} elseif($this->definedMode==self::MODE_PHAR) {
-			return $this->_extractPhar($filename);
+			$result=$this->_extractPhar($filename);
+		}
+		if($result) {
+			if($this->delete_archive) {
+				@unlink($filename);
+			}
+			return true;
 		}
 		$this->addError('Wrong mode for unpack');
 		return false;
@@ -701,7 +854,7 @@ $(document).ready(function(){
 	function stepCallback(data) {
 		if(data.hasOwnProperty('error')) {
 			block.find('a').removeClass('disabled');
-			var alertBlock=form.find('div[role=alert]').append(data.error);
+			var alertBlock=block.find('div[role=alert]').append(data.error);
 			if(data.hasOwnProperty('errorsList')) {
 				for(var ii in data.errorsList) {
 					if(data.errorsList.hasOwnProperty(ii)) {
@@ -726,6 +879,7 @@ $(document).ready(function(){
 		obDom.find('a[role=linkPart]').click(function(e){
 			e.preventDefault();
 			filesList.find('a').addClass('disabled');
+			var alertBlock=block.find('div[role=alert]').html('').addClass('hidden');
 			$.post('{$application->getActionUrl('uploadFiles')}',{'part':$(this).attr('href')},stepCallback,'json');
 		});
 	}
@@ -751,8 +905,12 @@ PHP_EOT;
 		if($this->upload_path!='/') {
 			$result.='<a href=".." class="list-group-item" role="linkPart">..</a>';
 		}
-		foreach($arFiles as $file) {
-			$result.='<a href="'.$file.'" class="list-group-item" role="linkPart">'.$file.'</a>';
+		if(is_array($arFiles)) {
+			foreach($arFiles as $file) {
+				if($file=='.') continue;
+				if($file=='..') continue;
+				$result.='<a href="'.$file.'" class="list-group-item" role="linkPart">'.$file.'</a>';
+			}
 		}
 		$result.='</div>';
 		return $result;
@@ -766,9 +924,14 @@ PHP_EOT;
 		if($part=='..') {
 			$upload_path=dirname($this->upload_path);
 		} else {
-			$upload_path=$part;
+			if(strpos($part,'/')===false) {
+				$upload_path=$this->upload_path.'/'.$part;
+			} else {
+				$upload_path=$part;
+			}
 		}
 		if(!@ftp_chdir($this->connection,$upload_path)){
+			$this->upload_path=ftp_pwd($this->connection);
 			$this->addError('Error switching directory');
 		} else {
 			$this->upload_path=$upload_path;
@@ -842,10 +1005,13 @@ class Application {
 
 	public function ajaxError($message,$code=1,$list=array()) {
 		$arResult=array(
-			'error'=>$message,
+			'error'=>nl2br($message),
 			'errorCode'=>$code
 		);
 		if(!empty($list)) {
+			foreach($list as &$sLine) {
+				$sLine=nl2br($sLine);
+			}
 			$arResult['errorsList']=$list;
 		}
 		echo json_encode($arResult);
@@ -867,6 +1033,15 @@ class Application {
 		$arResult=array(
 			'success'=>$message,
 			'location'=>$this->getStepUrl($step)
+		);
+		echo json_encode($arResult);
+		return true;
+	}
+
+	public function ajaxRedirect($url,$message='Redirect to url...') {
+		$arResult=array(
+			'success'=>$message,
+			'location'=>$url
 		);
 		echo json_encode($arResult);
 		return true;
@@ -941,6 +1116,20 @@ class Application {
 		$obForm->setTitle('Распаковка архива на сайте');
 		$this->storage->load($obForm);
 		$this->render->formWithActions($obForm,'unpackCheck','goMODX')->render();
+	}
+
+	public function stepMODXSetup() {
+		$this->render->iframe('/setup/index.php','MODX setup','UndumpDB')->render();
+	}
+
+	public function stepUndumpDB() {
+		$obForm=new DBUndumpForm();
+		$this->storage->load($obForm);
+		$this->render->formWithActions($obForm,'undumpDBCheck','goodby')->render();
+	}
+
+	public function stepGoodby() {
+		$this->render->simplePage('Всё готово!','Спасибо, все операции выполнены. Не забудьте удалить файл setup.php с сайта.')->render();
 	}
 
 	/* ---------------------------------------- ACTIONS BLOCK --------------------------------------- */
@@ -1106,12 +1295,49 @@ class Application {
 		$filename=$this->getScriptRoot().DIRECTORY_SEPARATOR.'archive.tar.gz';
 		if($obForm->check()) {
 			if($obForm->makeExtract($filename)) {
-				return $this->ajaxSuccess('Unpack successfull');
+				if($obForm->redirect_to_modx_setup) {
+					return $this->ajaxRedirect($this->getStepUrl('MODXSetup'),'Redirecting to MODX setup');
+				} else {
+					return $this->ajaxSuccess('Unpack successfull');
+				}
 			} else {
 				return $this->ajaxError('Unpack errors',self::ERROR_ACTION,$obForm->getErrors());
 			}
 		} else {
 			return $this->ajaxError('Unpack prepare errors',self::ERROR_ACTION,$obForm->getErrors());
+		}
+	}
+
+	public function actionUndumpDBCheck() {
+		$obForm=new DBUndumpForm();
+		$this->storage->load($obForm);
+		if(!$this->isPostRequest()) {
+			return $this->ajaxError('No data send',self::ERROR_WRONG_REQUEST);
+		}
+		$obForm->setAttributes($_POST);
+		$this->storage->save($obForm);
+		if($obForm->check()) {
+			return $this->ajaxSuccess('Connection to DB successfull','makeUndump');
+		} else {
+			return $this->ajaxError('Error checking connection',self::ERROR_ACTION,$obForm->getErrors());
+		}
+	}
+
+	public function actionMakeUndump() {
+		$obForm=new DBUndumpForm();
+		$this->storage->load($obForm);
+		if($obForm->check()) {
+			$filename=$this->getScriptRoot().DIRECTORY_SEPARATOR.'dump.sql';
+			if(!file_exists($filename)) {
+				return $this->ajaxError('Dump file not found: '.$filename,self::ERROR_ACTION);
+			}
+			if($obForm->makeUndump($filename)) {
+				return $this->ajaxSuccess('Dump successfully imported: <a href="dump.sql">dump.sql</a>');
+			} else {
+				return $this->ajaxError('Cant make undump',self::ERROR_ACTION,$obForm->getErrors());
+			}
+		} else {
+			return $this->ajaxError('Error connecting to DB',self::ERROR_ACTION,$obForm->getErrors());
 		}
 	}
 
