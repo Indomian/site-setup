@@ -5,16 +5,17 @@
  */
 define('SESSION_NAME','setupSession');
 
-//TEXTS SECTION
-define('WELCOME_TITLE','Упаковщик сайтов');
-define('WELCOME_TEXT','Упаковщик сайтов поможет вам сделать архив всего сайта, выполнить его загрузку на удалённый хостинг, а затем выполнить распаковку и установку сайта на удалённом хостинге.');
-
-define('WELCOME_SETUP_TITLE','Распаковщик сайтов');
-define('WELCOME_SETUP_TEXT','Распаковщик сайта, поможет вам распаковать загруженный архив и загрузить в базу данных взятый с собой архив БД.');
+function _t($code) {
+	global $arLang;
+	if(isset($arLang[$code])) {
+		return $arLang[$code];
+	}
+	return "'".$code."'";
+}
 
 class Render {
 	public $result='';
-	public $title='Site archive 0.1';
+	public $title='Site archive 0.2.0';
 
 	private $headerRendered=false;
 	/**
@@ -26,42 +27,78 @@ class Render {
 		$this->application=$parent;
 	}
 
+	public function _($msg) {
+		return _t($msg);
+	}
+
 	//Common renders
 	public function getMenu() {
 		$arMenu=array(
-			'welcome'=>'Начало',
-			'dumpDB'=>'Архивация базы',
-			'archiveSite'=>'Создание архива',
+			'welcome'=>_t('STEP_WELCOME'),
+			'dumpDB'=>_t('STEP_DUMPDB'),
+			'archiveSite'=>_t('STEP_ARCHIVE'),
 			'uploadSite'=>array(
-				'title'=>'Загрузить архив',
+				'title'=>_t('STEP_UPLOAD'),
 				'steps'=>array(
 					'UploadFTPNavigate',
 					'UploadFTPUpload'
 				)
 			),
 			'setupWelcome'=>array(
-				'title'=>'Распаковка',
+				'title'=>_t('STEP_UNPACK'),
 				'steps'=>array(
-					'unpack',
-					'MODXSetup'
+					'unpack'=>_t('STEP_UNPACK'),
+					'MODXSetup'=>_t('STEP_MODXSetup'),
+					'MODXConfig'=>_t('STEP_MODXConfig')
 				)
 			),
-			'undumpDB'=>'Импорт архива базы',
-			'goodby'=>'Выполнено'
+			'undumpDB'=>_t('STEP_UNDUMP'),
+			'goodby'=>_t('STEP_GOODBY')
 		);
 		$result='';
 		foreach($arMenu as $key=>$title) {
 			if(is_array($title)) {
 				$title['steps'][]=$key;
-				foreach($title['steps'] as &$step) {
-					$step=strtolower($step);
+				$bNeedDropdown=false;
+				$arSearch=array();
+				foreach($title['steps'] as $subkey=>&$step) {
+					if(is_numeric($subkey)) {
+						$arSearch[]=strtolower($step);
+					} else {
+						$arSearch[]=strtolower($subkey);
+						$bNeedDropdown=true;
+					}
 				}
-				if(in_array($this->application->getStep(),$title['steps'])) {
-					$result.='<li class="active">';
+				if($bNeedDropdown) {
+					if(in_array($this->application->getStep(),$arSearch)) {
+						$result.='<li class="dropdown active">';
+					} else {
+						$result.='<li class="dropdown">';
+					}
+					$result.='<a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button">'.$title['title'].($bNeedDropdown?' <span class="caret"></span>':'').'</a>';
+					$result.='<ul class="dropdown-menu" role="menu">';
+					foreach($title['steps'] as $subkey=>&$step) {
+						if(is_numeric($subkey)) {
+							continue;
+						} else {
+							if($this->application->getStep()==$subkey) {
+								$result.='<li class="active">';
+							} else {
+								$result.='<li>';
+							}
+							$result.='<a href="'.$this->application->getStepUrl($subkey).'">'.$step.'</a></li>';
+						}
+					}
+					$result.='</ul>';
 				} else {
-					$result.='<li>';
+					if(in_array($this->application->getStep(),$arSearch)) {
+						$result.='<li class="active">';
+					} else {
+						$result.='<li class="">';
+					}
+					$result.='<a href="'.$this->application->getStepUrl($key).'">'.$title['title'].'</a>';
 				}
-				$result.='<a href="'.$this->application->getStepUrl($key).'">'.$title['title'].'</a></li>';
+				$result.='</li>';
 			} else {
 				if($this->application->getStep()==strtolower($key)) {
 					$result.='<li class="active">';
@@ -74,11 +111,15 @@ class Render {
 		return $result;
 	}
 
+	public function getFieldId($name) {
+		return 'field'.hash('crc32b',$name);
+	}
+
 	public function getTextField(Form $form,$key) {
 		$id=get_class($form);
 		$name=$id.'['.$key.']';
-		$id='field'.hash('crc32b',$name);
-		$result='<div class="form-group"><label for="'.$id.'" class="col-sm-2 control-label">'.$form->getAttributeLabel($key).'</label><div class="col-sm-10">'.
+		$id=$this->getFieldId($name);
+		$result='<div class="form-group"><label for="'.$id.'" class="col-sm-3 control-label">'.$form->getAttributeLabel($key).'</label><div class="col-sm-9">'.
 			'<input type="text" class="form-control" id="'.$id.'" value="'.$form->$key.'" name="'.$name.'"></div></div>';
 		return $result;
 	}
@@ -86,9 +127,9 @@ class Render {
 	public function getTextareaField(Form $form,$key) {
 		$id=get_class($form);
 		$name=$id.'['.$key.']';
-		$id='field'.hash('crc32b',$name);
-		$result='<div class="form-group"><label for="'.$id.'" class="col-sm-2 control-label">'.$form->getAttributeLabel($key).'</label><div class="col-sm-10">'.
-			'<textarea class="form-control" id="'.$id.'" name="'.$name.'">'.htmlentities($form->$key,ENT_QUOTES,'utf-8',false).'</textarea></div></div>';
+		$id=$this->getFieldId($name);
+		$result='<div class="form-group"><label for="'.$id.'" class="col-sm-3 control-label">'.$form->getAttributeLabel($key).'</label><div class="col-sm-9">'.
+			'<textarea class="form-control" id="'.$id.'" name="'.$name.'" rows="10">'.htmlentities($form->$key,ENT_QUOTES,'utf-8',false).'</textarea></div></div>';
 		return $result;
 	}
 
@@ -96,7 +137,7 @@ class Render {
 		$id=get_class($form);
 		$name=$id.'['.$key.']';
 		$id='field'.hash('crc32b',$name);
-		$result='<div class="form-group"><div class="col-sm-offset-2 col-sm-10"><div class="checkbox"><label><input type="checkbox" name="'.$name.'" value="1" '.($form->$key?'checked':'').'> '
+		$result='<div class="form-group"><div class="col-sm-offset-3 col-sm-9"><div class="checkbox"><label><input type="checkbox" name="'.$name.'" value="1" '.($form->$key?'checked':'').'> '
 			.$form->getAttributeLabel($key).'</label></div></div></div>';
 		return $result;
 	}
@@ -139,7 +180,7 @@ PHP_EOT;
 		}
 		$this->result.='<div class="jumbotron"><h1>'.$title.'</h1><p>'.$content.'</p>';
 		if(!empty($link)) {
-			$this->result.='<p><a class="btn btn-primary btn-lg" href="'.$link.'" role="button">Далее</a></p>';
+			$this->result.='<p><a class="btn btn-primary btn-lg" href="'.$link.'" role="button">'._t('NEXT').'</a></p>';
 		}
 		$this->result.='</div>';
 		$this->footer();
@@ -160,10 +201,11 @@ PHP_EOT;
 		$this->result.='<div class="panel panel-default"><div class="panel-heading"><h3 style="margin-top:10px;">'.$title;
 		if(!empty($nextStep)) {
 			$link=$this->application->getStepUrl($nextStep);
-			$this->result.='<a href="'.$link.'" class="btn btn-primary pull-right">Next</a>';
+			$this->result.='<a href="'.$link.'" class="btn btn-primary pull-right">'._t('NEXT').'</a>';
 		}
 		$this->result.='</h3></div><div class="panel-body">'.
-			'<iframe border="no" style="width:100%;height:100%;" src="'.$url.'" id="frameContainer"></iframe></div></div>';
+			'<p>'._t('Attention! All scripts in iframe is disabled. If you required to use them, please follow link and perform required actions. Then you can continue using setup script. Link: ').'<a href="'.$url.'" target="_blank">'.$url.'</a></p>'.
+			'<iframe border="no" style="width:100%;height:100%;" src="'.$url.'" id="frameContainer" sandbox="allow-forms"></iframe></div></div>';
 		$this->result.=<<<PHP_EOT
 <script type="text/javascript">
 $(document).ready(function(){
@@ -185,6 +227,20 @@ PHP_EOT;
 		return $this;
 	}
 
+	public function getPresetButton(Form $form,$arButton) {
+		$id='btn'.hash('crc32b',json_encode($arButton));
+		$result='<button type="button" class="btn btn-info" id="'.$id.'">'.$arButton['title'].'</button>';
+		$result.='<script type="text/javascript">$(document).ready(function(){$("#'.$id.'").click(function(e){e.preventDefault();';
+		foreach($arButton['data'] as $key=>$fieldVal) {
+			$id=get_class($form);
+			$name=$id.'['.$key.']';
+			$fieldId=$this->getFieldId($name);
+			$result.='$("#'.$fieldId.'").val("'.$fieldVal.'");';
+		}
+		$result.='})});</script>';
+		return $result;
+	}
+
 	public function formWithActions(Form $form,$submitAction='',$nextStep='') {
 		if(!$this->headerRendered) {
 			$this->header();
@@ -193,6 +249,19 @@ PHP_EOT;
 		$formId='form'.hash('crc32b',$class);
 		$this->result.='<div class="panel panel-default"><div class="panel-heading">'.$form->getTitle().'</div><div class="panel-body">'.
 			'<form class="form-horizontal" role="form" id="'.$formId.'" action="" method="post"><div class="alert alert-warning hidden" role="alert"></div>';
+		if($form->getHeaderMessage()!='') {
+			$this->result.='<div class="alert alert-info">'.$form->getHeaderMessage().'</div>';
+		}
+		$arButtons=$form->getHeaderButtons();
+		if(!empty($arButtons)) {
+			$this->result.='<div class="form-group"><div class="col-sm-10 col-sm-offset-3"><div class="btn-group">';
+			foreach($arButtons as $arButton) {
+				if($arButton['type']=='fill') {
+					$this->result.=$this->getPresetButton($form, $arButton);
+				}
+			}
+			$this->result.='</div></div></div>';
+		}
 		foreach($form->attributesNames() as $key) {
 			$type=$form->getAttributeType($key);
 			if(method_exists($this,'get'.$type.'field')) {
@@ -202,9 +271,9 @@ PHP_EOT;
 				$this->result.=$this->getTextField($form,$key);
 			}
 		}
-		$this->result.='<div class="form-group"><div class="col-sm-offset-2 col-sm-10"><button type="submit" class="btn btn-default">Send</button>';
+		$this->result.='<div class="form-group"><div class="col-sm-offset-3 col-sm-9"><button type="submit" class="btn btn-default">'._t('RUN_BUTTON').'</button>';
 		if($nextStep!='') {
-			$this->result.=' <a href="'.$this->application->getStepUrl($nextStep).'" class="btn btn-primary hidden" role="nextStepButton">Next</a>';
+			$this->result.=' <a href="'.$this->application->getStepUrl($nextStep).'" class="btn btn-primary hidden" role="nextStepButton">'._t('NEXT_BUTTON').'</a>';
 		}
 		$this->result.='</div></div>';
 		if(!empty($submitAction)) {
@@ -251,7 +320,7 @@ $(document).ready(function(){
 			if(data.hasOwnProperty('location')) {
 				document.location=data.location;
 			} else if(data.hasOwnProperty('nextAction')) {
-				successBlock.append('Running: <b>['+data.nextAction+']</b>: ');
+				successBlock.append('{$this->_('RUNNING')}<b>['+data.nextAction+']</b>: ');
 				$.get('{$this->application->getScriptUrl()}',{'action':data.nextAction},stepCallback,'json');
 			} else {
 				setProgress(100);
@@ -270,7 +339,7 @@ $(document).ready(function(){
 		var data=form.serialize();
 		form.find('input,button,select').attr('disabled',true);
 		setProgress(10);
-		var successBlock=form.find('div[role=success]').removeClass('hidden').append('Running: <b>[{$submitAction}]</b>: ');
+		var successBlock=form.find('div[role=success]').removeClass('hidden').append('{$this->_('RUNNING')}<b>[{$submitAction}]</b>: ');
 		$.post('{$this->application->getActionUrl($submitAction)}',data,stepCallback,'json');
 	});
 });
@@ -292,6 +361,7 @@ PHP_EOT;
 class Form {
 	protected $errors=array();
 	protected $title='Form';
+	protected $headerMessage='';
 
 	public function setAttributes($arValues) {
 		$className=get_class($this);
@@ -316,6 +386,10 @@ class Form {
 
 	public function getTitle() {
 		return $this->title;
+	}
+
+	public function getHeaderMessage() {
+		return $this->headerMessage;
 	}
 
 	public function attributesNames() {
@@ -350,6 +424,10 @@ class Form {
 
 	public function getAttributeLabel($field) {
 		return $field;
+	}
+
+	public function getHeaderButtons() {
+		return array();
 	}
 }
 
@@ -451,6 +529,51 @@ class DBDumpForm extends Form{
 		$this->addError('Wrong mode for dump process');
 		return false;
 	}
+
+	public function getAttributeLabel($field) {
+		return _t('DBDUMP_FIELD_'.$field);
+	}
+
+	/**
+	 * Method tries to detect mysql access data based on current site file system
+	 * @param $application
+	 */
+	public function initFromSystem(Application $application) {
+		$path=$application->getScriptRoot();
+		if(file_exists($path.'/core/config/config.inc.php')) {
+			//MODX
+			$content=file_get_contents($path.'/core/config/config.inc.php');
+			if(preg_match('#^\$database_server.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->host)) {
+				$this->host=$matches[2];
+			}
+			if(preg_match('#^\$database_user.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->login)) {
+				$this->login=$matches[2];
+			}
+			if(preg_match('#^\$database_password.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->password)) {
+				$this->password=$matches[2];
+			}
+			if(preg_match('#dbname=([^;]+);#im',$content,$matches) && empty($this->name)) {
+				$this->name=$matches[1];
+			}
+			$this->headerMessage=_t('DBDUMP_MODX_DATA');
+		} elseif(file_exists($path.'/bitrix/php_interface/dbconn.php')) {
+			//Bitrix
+			$content=file_get_contents($path.'/bitrix/php_interface/dbconn.php');
+			if(preg_match('#^\$DBHost.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->host)) {
+				$this->host=$matches[2];
+			}
+			if(preg_match('#^\$DBLogin.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->login)) {
+				$this->login=$matches[2];
+			}
+			if(preg_match('#^\$DBPassword.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->password)) {
+				$this->password=$matches[2];
+			}
+			if(preg_match('#^\$DBName.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->name)) {
+				$this->name=$matches[2];
+			}
+			$this->headerMessage=_t('DBDUMP_BITRIX_DATA');
+		}
+	}
 }
 
 /**
@@ -542,6 +665,10 @@ class DBUndumpForm extends Form{
 		return false;
 	}
 
+	public function getAttributeLabel($field) {
+		return _t('UNDUMP_FIELD_'.$field);
+	}
+
 	public function makeUndump($filename) {
 		if($this->definedMode==self::DB_MODE_CONSOLE) {
 			return $this->_dumpConsole($filename);
@@ -550,6 +677,47 @@ class DBUndumpForm extends Form{
 		}
 		$this->addError('Wrong mode for undump process');
 		return false;
+	}
+
+	/**
+	 * Method tries to detect mysql access data based on current site file system
+	 * @param $application
+	 */
+	public function initFromSystem(Application $application) {
+		$path=$application->getScriptRoot();
+		if(file_exists($path.'/core/config/config.inc.php')) {
+			//MODX
+			$content=file_get_contents($path.'/core/config/config.inc.php');
+			if(preg_match('#^\$database_server.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->host)) {
+				$this->host=$matches[2];
+			}
+			if(preg_match('#^\$database_user.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->login)) {
+				$this->login=$matches[2];
+			}
+			if(preg_match('#^\$database_password.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->password)) {
+				$this->password=$matches[2];
+			}
+			if(preg_match('#dbname=([^;]+);#im',$content,$matches) && empty($this->name)) {
+				$this->name=$matches[1];
+			}
+			$this->headerMessage=_t('DBDUMP_MODX_DATA');
+		} elseif(file_exists($path.'/bitrix/php_interface/dbconn.php')) {
+			//Bitrix
+			$content=file_get_contents($path.'/bitrix/php_interface/dbconn.php');
+			if(preg_match('#^\$DBHost.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->host)) {
+				$this->host=$matches[2];
+			}
+			if(preg_match('#^\$DBLogin.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->login)) {
+				$this->login=$matches[2];
+			}
+			if(preg_match('#^\$DBPassword.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->password)) {
+				$this->password=$matches[2];
+			}
+			if(preg_match('#^\$DBName.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->name)) {
+				$this->name=$matches[2];
+			}
+			$this->headerMessage=_t('DBDUMP_BITRIX_DATA');
+		}
 	}
 }
 
@@ -600,7 +768,7 @@ class ArchiveForm extends Form {
 			$this->definedMode=self::MODE_PHAR;
 			return true;
 		} else {
-			$this->addError('Cant find way to make archive');
+			$this->addError(_t('Cant find way to make archive'));
 		}
 		return false;
 	}
@@ -611,12 +779,12 @@ class ArchiveForm extends Form {
 			$path=$filename.DIRECTORY_SEPARATOR.str_replace(array('/','\\'),DIRECTORY_SEPARATOR,$sLine);
 			$starPos=strpos($path,'*');
 			if($starPos===false) {
-				if(!file_exists($path.DIRECTORY_SEPARATOR.'CACHEDIR.TAG')) {
+				if(file_exists($path) && is_dir($path) && !file_exists($path.DIRECTORY_SEPARATOR.'CACHEDIR.TAG')) {
 					if(!@touch($path.DIRECTORY_SEPARATOR.'CACHEDIR.TAG')) {
-						$this->addError('Cant mark directory: '.$path);
+						$this->addError(_t('Cant mark directory: ').$path);
 					}
+					$total++;
 				}
-				$total++;
 			} else {
 				$prePath=rtrim(substr($path,0,$starPos),DIRECTORY_SEPARATOR);
 				$afterPath=substr($path,$starPos+2);
@@ -625,11 +793,11 @@ class ArchiveForm extends Form {
 					if($file=='.') continue;
 					if($file=='..') continue;
 					$subPath=$prePath.DIRECTORY_SEPARATOR.$file;
-					if(is_dir($subPath)) {
+					if(is_dir($subPath) && file_exists($subPath)) {
 						$total++;
 						if(!file_exists($subPath.DIRECTORY_SEPARATOR.'CACHEDIR-ALL.TAG')) {
 							if(!@touch($subPath.DIRECTORY_SEPARATOR.'CACHEDIR-ALL.TAG')) {
-								$this->addError('Cant mark directory: '.$subPath);
+								$this->addError(_t('Cant mark directory: ').$subPath);
 							}
 						}
 					}
@@ -641,6 +809,10 @@ class ArchiveForm extends Form {
 
 	public function _archiveConsole($filename) {
 		$temp_file = tempnam(sys_get_temp_dir(), 'archive');
+		if($temp_file=='') {
+			$dirname=ini_get('upload_tmp_dir');
+			$temp_file = tempnam($dirname, 'archive');
+		}
 		$query='tar -czf '.$temp_file.' ./ --exclude=\'setup.php\' --exclude-vcs --exclude-tag=\'CACHEDIR.TAG\' --exclude-tag-all=\'CACHEDIR-ALL.TAG\' 2>&1';
 		exec($query,$output,$result);
 		if($result==0) {
@@ -649,11 +821,11 @@ class ArchiveForm extends Form {
 				return true;
 			} else {
 				@unlink($temp_file);
-				$this->addError('Cant move archive file: '.$temp_file.' to '.$filename);
+				$this->addError(_t('Cant move archive file: ').$temp_file._t(' to ').$filename);
 				return false;
 			}
 		}
-		$this->addError('Error archiving site: '.join(PHP_EOL,$output));
+		$this->addError(_t('Error archiving site: ').join(PHP_EOL,$output));
 		return false;
 	}
 
@@ -667,8 +839,117 @@ class ArchiveForm extends Form {
 		} elseif($this->definedMode==self::MODE_PHAR) {
 			return $this->_archivePhar($filename);
 		}
-		$this->addError('Wrong mode for archive');
+		$this->addError(_t('Wrong mode for archive'));
 		return false;
+	}
+
+	public function getAttributeLabel($field) {
+		return _t('ARCHIVE_FIELD_'.$field);
+	}
+
+	/**
+	 * Method tries to detect mysql access data based on current site file system
+	 * @param $application
+	 */
+	public function initFromSystem(Application $application) {
+		$path=$application->getScriptRoot();
+		if(file_exists($path.'/core/config/config.inc.php')) {
+			//MODX
+			$this->exclude="core/cache/\n_build/\nassets/cache/Pic/\ncore/packages/*/";
+			$this->headerMessage=_t('ARCHIVESITE_MODX_DATA');
+		} elseif(file_exists($path.'/bitrix/php_interface/dbconn.php')) {
+			$this->exclude="bitrix/cache/\nbitrix/managed_cache/\nbitrix/stack_cache/";
+			$this->headerMessage=_t('ARCHIVESITE_BITRIX_DATA');
+		}
+	}
+}
+
+class ClearForm extends Form {
+	const MODE_CONSOLE=1;
+	const MODE_PHAR=2;
+
+	protected $definedMode;
+	public $exclude='';
+
+	/**
+	 * Method tries to connect to DB using console utilities
+	 * @return bool
+	 */
+	public function connectToConsole() {
+		exec('rm --help',$output,$return);
+		if($return!=0) {
+			return false;
+		}
+		return true;
+	}
+
+	public function check() {
+		if($this->connectToConsole()) {
+			$this->definedMode=self::MODE_CONSOLE;
+			return true;
+		} elseif($this->connectToPhar()) {
+			$this->definedMode=self::MODE_PHAR;
+			return true;
+		} else {
+			$this->addError(_t('Cant find way to make archive'));
+		}
+		return false;
+	}
+
+	public function connectToPhar() {
+		return class_exists('PharData');
+	}
+
+	public function getExcludeList() {
+		$arData=explode("\n",$this->exclude);
+		foreach($arData as &$sLine) {
+			$sLine=trim($sLine);
+		}
+		return $arData;
+	}
+
+	public function _clearConsole($filename) {
+		foreach($this->getExcludeList() as $sPath) {
+			if(file_exists($filename.DIRECTORY_SEPARATOR.$sPath) && is_dir($filename.DIRECTORY_SEPARATOR.$sPath)) {
+				$query="rm -r ".$filename.DIRECTORY_SEPARATOR.$sPath.DIRECTORY_SEPARATOR.'*';
+				exec($query,$output,$result);
+			}
+		}
+		return true;
+	}
+
+	public function _clear($filename) {
+		return false;
+	}
+
+	public function makeClear($filename) {
+		if($this->definedMode==self::MODE_CONSOLE) {
+			return $this->_clearConsole($filename);
+		} elseif($this->definedMode==self::MODE_PHAR) {
+			return $this->_clear($filename);
+		}
+		$this->addError(_t('Wrong mode for clear'));
+		return false;
+	}
+
+	public function getAttributeLabel($field) {
+		return _t('CLEAR_FIELD_'.$field);
+	}
+
+	/**
+	 * Method tries to detect mysql access data based on current site file system
+	 * @param $application
+	 */
+	public function initFromSystem(Application $application) {
+		$path=$application->getScriptRoot();
+		if(file_exists($path.'/core/config/config.inc.php')) {
+			//MODX
+			$this->exclude="core/cache\nassets/cache/Pic";
+			$this->headerMessage=_t('CLEAR_MODX_DATA');
+		} elseif(file_exists($path.'/bitrix/php_interface/dbconn.php')) {
+			$this->exclude="bitrix/cache\nbitrix/managed_cache\nbitrix/stack_cache";
+			$this->headerMessage=_t('CLEAR_BITRIX_DATA');
+		}
 	}
 }
 
@@ -678,6 +959,7 @@ class UnpackForm extends Form {
 
 	public $redirect_to_modx_setup;
 	public $delete_archive;
+	public $auto_create_config;
 
 	protected $definedMode;
 
@@ -729,6 +1011,10 @@ class UnpackForm extends Form {
 		return false;
 	}
 
+	public function getAttributeLabel($field) {
+		return _t('UNPACK_FIELD_'.$field);
+	}
+
 	public function makeExtract($filename) {
 		$result=false;
 		if($this->definedMode==self::MODE_CONSOLE) {
@@ -744,6 +1030,149 @@ class UnpackForm extends Form {
 		}
 		$this->addError('Wrong mode for unpack');
 		return false;
+	}
+}
+
+class MODXConfigForm extends Form {
+	public $login;
+	public $password;
+	public $name;
+	public $host;
+	public $root;
+
+	/**
+	 * Method tries to connect to DB using mysqli functions
+	 * @return bool
+	 */
+	public function connectToMySQLi() {
+		if(!function_exists('mysqli_connect')) {
+			return false;
+		}
+		$resource=@mysqli_connect($this->host,$this->login,$this->password,$this->name);
+		if(!$resource) {
+			return false;
+		}
+		if(!@mysqli_select_db($resource,$this->name)) {
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Method checks if it can connect to DB. First it check if it could be done in
+	 * console mode (mysqldump utility) if not - checks if it can be done as mysqli connection
+	 */
+	public function check() {
+		if($this->connectToMySQLi()) {
+			return true;
+		} else {
+			$this->addError('Cant connect to DB');
+		}
+		return false;
+	}
+
+	public function getAttributeLabel($field) {
+		return _t('MODXCONFIG_FIELD_'.$field);
+	}
+
+	/**
+	 * Method tries to detect mysql access data based on current site file system
+	 * @param $application
+	 */
+	public function initFromSystem(Application $application) {
+		$path=$application->getScriptRoot();
+		if(file_exists($path.'/core/config/config.inc.php')) {
+			//MODX
+			$content=file_get_contents($path.'/core/config/config.inc.php');
+			if(preg_match('#^\$database_server.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->host)) {
+				$this->host=$matches[2];
+			}
+			if(preg_match('#^\$database_user.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->login)) {
+				$this->login=$matches[2];
+			}
+			if(preg_match('#^\$database_password.*=.*("|\')([^\'"]+)("|\');#im',$content,$matches) && empty($this->password)) {
+				$this->password=$matches[2];
+			}
+			if(preg_match('#dbname=([^;]+);#im',$content,$matches) && empty($this->name)) {
+				$this->name=$matches[1];
+			}
+			$this->headerMessage=_t('DBDUMP_MODX_DATA');
+		}
+		$this->root=$path;
+	}
+
+	private function processConfig($path,$arPaths,$pattern,$replace) {
+		if(file_exists($path)) {
+			$content=file_get_contents($path);
+			$new=preg_replace($pattern,$replace,$content);
+			if($new!=$content) {
+				if(!@file_put_contents($path,$new)) {
+					$this->addError('Cant save config file: '.$path);
+					return false;
+				} else{
+					return true;
+				}
+			} else {
+				return true;
+			}
+		}
+		$this->addError('File not found: '.$path);
+		return false;
+	}
+
+	public function writeConfig(Application $application) {
+		$path=array(
+			'root'=>$this->root.DIRECTORY_SEPARATOR,
+			'core'=>$this->root.DIRECTORY_SEPARATOR.'core'.DIRECTORY_SEPARATOR,
+			'connectors'=>$this->root.DIRECTORY_SEPARATOR.'connectors'.DIRECTORY_SEPARATOR,
+			'manager'=>$this->root.DIRECTORY_SEPARATOR.'manager'.DIRECTORY_SEPARATOR,
+			'assets'=>$this->root.DIRECTORY_SEPARATOR.'assets'.DIRECTORY_SEPARATOR,
+		);
+		$bResult=true;
+		$bResult&=$this->processConfig($path['root'].'config.core.php',$path,
+			'#define(\'MODX_CORE_PATH\',\s*\'([\w\d\/_\-]+)\');#',
+			'define(\'MODX_CORE_PATH\',\''.$path['core'].'\');');
+		$bResult&=$this->processConfig($path['connectors'].'config.core.php',$path,
+			'#define(\'MODX_CORE_PATH\',\s*\'([\w\d\/_\-]+)\');#',
+			'define(\'MODX_CORE_PATH\',\''.$path['core'].'\');');
+		$bResult&=$this->processConfig($path['manager'].'config.core.php',$path,
+			'#define(\'MODX_CORE_PATH\',\s*\'([\w\d\/_\-]+)\');#',
+			'define(\'MODX_CORE_PATH\',\''.$path['core'].'\');');
+		//Main config
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$database_server\s*=\s*\'([\w\d\.]+)\';#',
+			'$database_server = \''.$this->host.'\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$database_user\s*=\s*\'([\w\d\.]+)\';#',
+			'$database_user = \''.$this->login.'\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$database_password\s*=\s*\'.*\';#',
+			'$database_password = \''.$this->password.'\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$dbase\s*=\s*\'([\w\d\.]+)\';#',
+			'$dbase = \''.$this->name.'\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$database_dsn\s*=\s*\'.*\';#',
+			'$database_dsn = \'mysql:host='.$this->host.';dbname='.$this->name.';charset=utf8\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$modx_core_path\s*=\s*\'([\w\d\/_\-]+)\';#',
+			'$modx_core_path = \''.$path['core'].'\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$modx_processors_path\s*=\s*\'([\w\d\/_\-]+)\';#',
+			'$modx_processors_path = \''.$path['core'].'model/modx/processors/\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$modx_connectors_path\s*=\s*\'([\w\d\/_\-]+)\';#',
+			'$modx_connectors_path = \''.$path['connectors'].'\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$modx_manager_path\s*=\s*\'([\w\d\/_\-]+)\';#',
+			'$modx_manager_path = \''.$path['manager'].'\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$modx_base_path\s*=\s*\'([\w\d\/_\-]+)\';#',
+			'$modx_base_path = \''.$path['root'].'\';');
+		$bResult&=$this->processConfig($path['core'].'config/config.inc.php',$path,
+			'#\$modx_assets_path\s*=\s*\'([\w\d\/_\-]+)\';#',
+			'$modx_assets_path = \''.$path['root'].'\';');
+		return $bResult;
 	}
 }
 
@@ -899,17 +1328,21 @@ PHP_EOT;
 				$this->addError('Error switching directory');
 			}
 		}
-		$result='<p>Текущий путь: <b>'.$this->upload_path.'</b> <a href="'.$application->getStepUrl('uploadFTPUpload').'" class="btn btn-primary" name="select">Select</a></p>';
-		$arFiles=ftp_nlist($this->connection,$this->upload_path);
+		$result='<p>Текущий путь: <div class="input-group"><input type="text" readonly value="'.$this->upload_path.'" class="form-control"/> <a href="'.$application->getStepUrl('uploadFTPUpload').'" class="btn btn-primary input-group-addon" name="select" style="color:white;">'._t('Select').'</a></div></p>';
+		$arFiles=ftp_rawlist($this->connection,$this->upload_path);
 		$result.='<div class="list-group">';
 		if($this->upload_path!='/') {
 			$result.='<a href=".." class="list-group-item" role="linkPart">..</a>';
 		}
 		if(is_array($arFiles)) {
 			foreach($arFiles as $file) {
+				$arFile=preg_split('#\s+#',$file);
+				$isDirectory=strpos($arFile[0],'d')!==false;
+				$file=join(' ',array_slice($arFile,8));
+				if(!$isDirectory) continue;
 				if($file=='.') continue;
 				if($file=='..') continue;
-				$result.='<a href="'.$file.'" class="list-group-item" role="linkPart">'.$file.'</a>';
+				$result.='<a href="'.$file.'" class="list-group-item" role="linkPart"><span class="glyphicon glyphicon-folder-close"></span> '.$file.'</a>';
 			}
 		}
 		$result.='</div>';
@@ -930,6 +1363,7 @@ PHP_EOT;
 				$upload_path=$part;
 			}
 		}
+		$upload_path=str_replace('//','/',$upload_path);
 		if(!@ftp_chdir($this->connection,$upload_path)){
 			$this->upload_path=ftp_pwd($this->connection);
 			$this->addError('Error switching directory');
@@ -937,6 +1371,37 @@ PHP_EOT;
 			$this->upload_path=$upload_path;
 		}
 		return !$this->hasErrors();
+	}
+
+	public function getAttributeLabel($field) {
+		return _t('UPLOAD_FIELD_'.$field);
+	}
+
+	public function getHeaderButtons() {
+		return array(
+			'dev2'=>array(
+				'title'=>'dev2.vortex',
+				'type'=>'fill',
+				'data'=>array(
+					'domain'=>'.dev2.vortex',
+					'ftp_host'=>'dev2.vortex',
+					'ftp_port'=>21,
+					'ftp_login'=>'www-data',
+					'ftp_password'=>'Pjd3TqFK'
+				)
+			),
+			'red'=>array(
+				'title'=>'red.hosting.webvortex.ru',
+				'type'=>'fill',
+				'data'=>array(
+					'domain'=>'',
+					'ftp_host'=>'red.hosting.webvortex.ru',
+					'ftp_port'=>21,
+					'ftp_login'=>'',
+					'ftp_password'=>''
+				)
+			)
+		);
 	}
 }
 
@@ -956,6 +1421,10 @@ class Storage {
 		if(isset($_SESSION[$id])) {
 			$form->setAttributes($_SESSION[$id]);
 		}
+	}
+
+	public function clear() {
+		$_SESSION=array();
 	}
 }
 
@@ -1031,7 +1500,7 @@ class Application {
 
 	public function ajaxStep($step,$message='Redirect...') {
 		$arResult=array(
-			'success'=>$message,
+			'success'=>_t($message),
 			'location'=>$this->getStepUrl($step)
 		);
 		echo json_encode($arResult);
@@ -1040,11 +1509,16 @@ class Application {
 
 	public function ajaxRedirect($url,$message='Redirect to url...') {
 		$arResult=array(
-			'success'=>$message,
+			'success'=>_t($message),
 			'location'=>$url
 		);
 		echo json_encode($arResult);
 		return true;
+	}
+
+	public function redirect($url) {
+		header('Location: '.$url);
+		die();
 	}
 
 	public function isAjaxRequest() {
@@ -1061,26 +1535,29 @@ class Application {
 	 *
 	 */
 	public function stepWelcome() {
-		$this->render->simplePage(WELCOME_TITLE,WELCOME_TEXT,'dumpDB')->render();
+		$this->storage->clear();
+		$this->render->simplePage(_t('WELCOME_TITLE'),_t('WELCOME_TEXT'),'dumpDB')->render();
 	}
 
 	public function stepDumpDB() {
 		$obForm=new DBDumpForm();
-		$obForm->setTitle('Подключение к БД');
+		$obForm->initFromSystem($this);
+		$obForm->setTitle(_t('DBDUMP_FORM_TITLE'));
 		$this->storage->load($obForm);
 		$this->render->formWithActions($obForm,'dumpDBCheck','archiveSite')->render();
 	}
 
 	public function stepArchiveSite() {
 		$obForm=new ArchiveForm();
-		$obForm->setTitle('Упаковка сайта');
+		$obForm->initFromSystem($this);
+		$obForm->setTitle(_t('ARCHIVE_FORM_TITLE'));
 		$this->storage->load($obForm);
 		$this->render->formWithActions($obForm,'archiveCheck','uploadSite')->render();
 	}
 
 	public function stepUploadSite() {
 		$obForm=new UploadForm();
-		$obForm->setTitle('Загрузка сайта');
+		$obForm->setTitle(_t('UPLOAD_FORM_TITLE'));
 		$this->storage->load($obForm);
 		$this->render->formWithActions($obForm,'uploadCheck')->render();
 	}
@@ -1095,7 +1572,7 @@ class Application {
 
 	public function stepUploadFTPUpload() {
 		$obForm=new UploadForm();
-		$obForm->setTitle('Загрузка архива на сайт');
+		$obForm->setTitle(_t('UPLOAD_UPLOAD_TO_FORM_TITLE'));
 		$this->storage->load($obForm);
 		$this->render->formWithActions($obForm,'uploadPreUpload','goOuter')->render();
 	}
@@ -1104,32 +1581,50 @@ class Application {
 		$obForm=new UploadForm();
 		$this->storage->load($obForm);
 		$link='http://'.$obForm->domain.'/setup.php?step=setupWelcome';
-		$this->render->simplePage('Всё готово к переходу','Мы всё упаковали и выгрузили на новую площадку. Мы готовы к завершению установки!','',$link)->render();
+		$this->render->simplePage(_t('GOTO_TITLE'),_t('GOTO_TEXT'),'',$link)->render();
 	}
 
 	public function stepSetupWelcome() {
-		$this->render->simplePage(WELCOME_SETUP_TITLE,WELCOME_SETUP_TEXT,'unpack')->render();
+		$this->render->simplePage(_t('WELCOME_SETUP_TITLE'),_t('WELCOME_SETUP_TEXT'),'unpack')->render();
 	}
 
 	public function stepUnpack() {
 		$obForm=new UnpackForm();
-		$obForm->setTitle('Распаковка архива на сайте');
+		$obForm->setTitle(_t('UNPACK_FORM_TITLE'));
 		$this->storage->load($obForm);
 		$this->render->formWithActions($obForm,'unpackCheck','goMODX')->render();
 	}
 
 	public function stepMODXSetup() {
-		$this->render->iframe('/setup/index.php','MODX setup','UndumpDB')->render();
+		$this->render->iframe('/setup/index.php',_t('MODX_SETUP_FORM_TITLE'),'UndumpDB')->render();
+	}
+
+	public function stepMODXConfig() {
+		$obForm=new MODXConfigForm();
+		$obForm->setTitle(_t('MODXCONFIG_FORM_TITLE'));
+		$obForm->initFromSystem($this);
+		$this->storage->load($obForm);
+		$this->render->formWithActions($obForm,'MODXConfigCheck','UndumpDB')->render();
 	}
 
 	public function stepUndumpDB() {
 		$obForm=new DBUndumpForm();
+		$obForm->initFromSystem($this);
+		$obForm->setTitle(_t('UNDUMP_FORM_TITLE'));
 		$this->storage->load($obForm);
 		$this->render->formWithActions($obForm,'undumpDBCheck','goodby')->render();
 	}
 
 	public function stepGoodby() {
-		$this->render->simplePage('Всё готово!','Спасибо, все операции выполнены. Не забудьте удалить файл setup.php с сайта.')->render();
+		$this->render->simplePage(_t('DONE_TITLE'),_t('DONE_TEXT'),'Clear')->render();
+	}
+
+	public function stepClear() {
+		$obForm=new ClearForm();
+		$obForm->check();
+		$obForm->initFromSystem($this);
+		$obForm->makeClear($this->getScriptRoot());
+		$this->redirect('/');
 	}
 
 	/* ---------------------------------------- ACTIONS BLOCK --------------------------------------- */
@@ -1137,12 +1632,12 @@ class Application {
 		$obForm=new DBDumpForm();
 		$this->storage->load($obForm);
 		if(!$this->isPostRequest()) {
-			return $this->ajaxError('No data send',self::ERROR_WRONG_REQUEST);
+			return $this->ajaxError(_t('No data send'),self::ERROR_WRONG_REQUEST);
 		}
 		$obForm->setAttributes($_POST);
 		$this->storage->save($obForm);
 		if($obForm->check()) {
-			return $this->ajaxSuccess('Connection to DB successfull','makeDump');
+			return $this->ajaxSuccess(_t('Connection to DB successfull'),'makeDump');
 		} else {
 			return $this->ajaxError('Error checking connection',self::ERROR_ACTION,$obForm->getErrors());
 		}
@@ -1158,7 +1653,7 @@ class Application {
 			}
 			$obForm->makeDump($filename);
 			if(file_exists($filename)) {
-				return $this->ajaxSuccess('Dump successfully created: <a href="dump.sql">dump.sql</a>');
+				return $this->ajaxSuccess(_t('Dump successfully created: ').'<a href="dump.sql">dump.sql</a>');
 			} else {
 				return $this->ajaxError('Cant make dump',self::ERROR_ACTION,$obForm->getErrors());
 			}
@@ -1171,14 +1666,14 @@ class Application {
 		$obForm=new ArchiveForm();
 		$this->storage->load($obForm);
 		if(!$this->isPostRequest()) {
-			return $this->ajaxError('No data send',self::ERROR_WRONG_REQUEST);
+			return $this->ajaxError(_t('No data send'),self::ERROR_WRONG_REQUEST);
 		}
 		$obForm->setAttributes($_POST);
 		$this->storage->save($obForm);
 		if($obForm->check()) {
-			return $this->ajaxSuccess('Archivation available','archiveExclude');
+			return $this->ajaxSuccess(_t('Archivation available'),'archiveExclude');
 		} else {
-			return $this->ajaxError('Error trying archive site',self::ERROR_ACTION,$obForm->getErrors());
+			return $this->ajaxError(_t('Error trying archive site'),self::ERROR_ACTION,$obForm->getErrors());
 		}
 	}
 
@@ -1188,12 +1683,12 @@ class Application {
 		if($obForm->check()) {
 			$excluded=$obForm->markExclude($this->getScriptRoot());
 			if($obForm->hasErrors()) {
-				return $this->ajaxError('Error trying mark exlude directories',self::ERROR_ACTION,$obForm->getErrors());
+				return $this->ajaxError(_t('Error trying mark exclude directories'),self::ERROR_ACTION,$obForm->getErrors());
 			} else {
-				return $this->ajaxSuccess('Excluded directories marked and ready: <b>'.$excluded.'</b>','archiveSite');
+				return $this->ajaxSuccess(_t('Excluded directories marked and ready: <b>').$excluded.'</b>','archiveSite');
 			}
 		} else {
-			return $this->ajaxError('Error trying mark exlude directories',self::ERROR_ACTION,$obForm->getErrors());
+			return $this->ajaxError(_t('Error trying mark exlude directories'),self::ERROR_ACTION,$obForm->getErrors());
 		}
 	}
 
@@ -1207,12 +1702,12 @@ class Application {
 			}
 			$obForm->makeArchive($filename);
 			if(file_exists($filename)) {
-				return $this->ajaxSuccess('Site successfully packed: <a href="archive.tar.gz">archive.tar.gz</a>');
+				return $this->ajaxSuccess(_t('Site successfully packed: <a href="archive.tar.gz">archive.tar.gz</a>'));
 			} else {
-				return $this->ajaxError('Error trying archive site: archive not found',self::ERROR_ACTION,$obForm->getErrors());
+				return $this->ajaxError(_t('Error trying archive site: archive not found'),self::ERROR_ACTION,$obForm->getErrors());
 			}
 		} else {
-			return $this->ajaxError('Error trying archive site',self::ERROR_ACTION,$obForm->getErrors());
+			return $this->ajaxError(_t('Error trying archive site'),self::ERROR_ACTION,$obForm->getErrors());
 		}
 	}
 
@@ -1225,9 +1720,9 @@ class Application {
 		$obForm->setAttributes($_POST);
 		$this->storage->save($obForm);
 		if($obForm->check()) {
-			return $this->ajaxSuccess('Connection available','uploadSelectRoot');
+			return $this->ajaxSuccess(_t('Connection available'),'uploadSelectRoot');
 		} else {
-			return $this->ajaxError('Error trying check connection',self::ERROR_ACTION,$obForm->getErrors());
+			return $this->ajaxError(_t('Error trying check connection'),self::ERROR_ACTION,$obForm->getErrors());
 		}
 	}
 
@@ -1258,9 +1753,9 @@ class Application {
 		$obForm->setAttributes($_POST);
 		$this->storage->save($obForm);
 		if($obForm->checkUpload()) {
-			return $this->ajaxSuccess('Upload to selected folder is available','uploadUpload');
+			return $this->ajaxSuccess(_t('Upload to selected folder is available'),'uploadUpload');
 		} else {
-			return $this->ajaxError('Error trying check upload availability',self::ERROR_ACTION,$obForm->getErrors());
+			return $this->ajaxError(_t('Error trying check upload availability'),self::ERROR_ACTION,$obForm->getErrors());
 		}
 	}
 
@@ -1268,9 +1763,9 @@ class Application {
 		$obForm=new UploadForm();
 		$this->storage->load($obForm);
 		if($obForm->makeUpload($this)) {
-			return $this->ajaxSuccess('Upload successfull');
+			return $this->ajaxSuccess(_t('Upload successfull'));
 		} else {
-			return $this->ajaxError('Error trying upload data',self::ERROR_ACTION,$obForm->getErrors());
+			return $this->ajaxError(_t('Error trying upload data'),self::ERROR_ACTION,$obForm->getErrors());
 		}
 	}
 
@@ -1278,14 +1773,14 @@ class Application {
 		$obForm=new UnpackForm();
 		$this->storage->load($obForm);
 		if(!$this->isPostRequest()) {
-			return $this->ajaxError('No data send',self::ERROR_WRONG_REQUEST);
+			return $this->ajaxError(_t('No data send'),self::ERROR_WRONG_REQUEST);
 		}
 		$obForm->setAttributes($_POST);
 		$this->storage->save($obForm);
 		if($obForm->check()) {
-			return $this->ajaxSuccess('Unpack available','unpackUnpack');
+			return $this->ajaxSuccess(_t('Unpack available'),'unpackUnpack');
 		} else {
-			return $this->ajaxError('Unpack unavailable',self::ERROR_ACTION,$obForm->getErrors());
+			return $this->ajaxError(_t('Unpack unavailable'),self::ERROR_ACTION,$obForm->getErrors());
 		}
 	}
 
@@ -1295,16 +1790,47 @@ class Application {
 		$filename=$this->getScriptRoot().DIRECTORY_SEPARATOR.'archive.tar.gz';
 		if($obForm->check()) {
 			if($obForm->makeExtract($filename)) {
-				if($obForm->redirect_to_modx_setup) {
+				if($obForm->auto_create_config) {
+					return $this->ajaxRedirect($this->getStepUrl('MODXConfig'),'Redirecting to modx config create');
+				} elseif($obForm->redirect_to_modx_setup) {
 					return $this->ajaxRedirect($this->getStepUrl('MODXSetup'),'Redirecting to MODX setup');
 				} else {
-					return $this->ajaxSuccess('Unpack successfull');
+					return $this->ajaxRedirect($this->getStepUrl('undumpDb'),'Unpack successfull redirecting to DBUndump');
 				}
 			} else {
-				return $this->ajaxError('Unpack errors',self::ERROR_ACTION,$obForm->getErrors());
+				return $this->ajaxError(_t('Unpack errors'),self::ERROR_ACTION,$obForm->getErrors());
 			}
 		} else {
-			return $this->ajaxError('Unpack prepare errors',self::ERROR_ACTION,$obForm->getErrors());
+			return $this->ajaxError(_t('Unpack prepare errors'),self::ERROR_ACTION,$obForm->getErrors());
+		}
+	}
+
+	public function actionMODXConfigCheck() {
+		$obForm=new MODXConfigForm();
+		$this->storage->load($obForm);
+		if(!$this->isPostRequest()) {
+			return $this->ajaxError(_t('No data send'),self::ERROR_WRONG_REQUEST);
+		}
+		$obForm->setAttributes($_POST);
+		$this->storage->save($obForm);
+		if($obForm->check()) {
+			return $this->ajaxSuccess(_t('Modx config available'),'MODXConfigWrite');
+		} else {
+			return $this->ajaxError(_t('Modx config unavailable'),self::ERROR_ACTION,$obForm->getErrors());
+		}
+	}
+
+	public function actionMODXConfigWrite() {
+		$obForm=new MODXConfigForm();
+		$this->storage->load($obForm);
+		if($obForm->check()) {
+			if($obForm->writeConfig($this)) {
+				return $this->ajaxSuccess('Configuration successfully updated');
+			} else {
+				return $this->ajaxError('Cant write configuration',self::ERROR_ACTION,$obForm->getErrors());
+			}
+		} else {
+			return $this->ajaxError('Error checking config parameters',self::ERROR_ACTION,$obForm->getErrors());
 		}
 	}
 
@@ -1360,6 +1886,96 @@ class Application {
 		}
 	}
 }
+
+//TEXTS SECTION
+global $arLang;
+$arLang=array(
+	'RUNNING'=>'Выполняю: ',
+	'STEP_WELCOME'=>'Начало',
+	'STEP_DUMPDB'=>'Архив БД',
+	'STEP_ARCHIVE'=>'Упаковка файлов',
+	'STEP_UPLOAD'=>'Выгрузка архива',
+	'STEP_UNPACK'=>'Распаковка архива',
+	'STEP_UNDUMP'=>'Разворачивание базы',
+	'STEP_MODXSetup'=>'Установка MODX',
+	'STEP_MODXConfig'=>'Конфигурация MODX',
+	'STEP_GOODBY'=>'Готово',
+	'NEXT'=>'Далее',
+	'RUN_BUTTON'=>'Выполнить',
+	'NEXT_BUTTON'=>'Продолжить <span class="glyphicon glyphicon-arrow-right"></span>',
+
+	'WELCOME_TITLE'=>'Упаковщик сайтов',
+	'WELCOME_TEXT'=>'Упаковщик сайтов поможет вам сделать архив всего сайта, выполнить его загрузку на удалённый хостинг, а затем выполнить распаковку и установку сайта на удалённом хостинге.',
+
+	'WELCOME_SETUP_TITLE'=>'Распаковщик сайтов',
+	'WELCOME_SETUP_TEXT'=>'Распаковщик сайта, поможет вам распаковать загруженный архив и загрузить в базу данных взятый с собой архив БД.',
+
+	'DBDUMP_MODX_DATA'=>'<i class="glyphicon glyphicon-info-sign"></i> Определил доступы по данным MODX',
+	'DBDUMP_BITRIX_DATA'=>'<i class="glyphicon glyphicon-info-sign"></i> Определил доступы по данным Битрикс',
+	'DBDUMP_FORM_TITLE'=>'Параметры подключения к БД',
+	'DBDUMP_FIELD_login'=>'Имя пользователя',
+	'DBDUMP_FIELD_password'=>'Пароль',
+	'DBDUMP_FIELD_name'=>'Название базы',
+	'DBDUMP_FIELD_host'=>'Хост для подключения',
+
+	'ARCHIVESITE_BITRIX_DATA'=>'Каталоги для исключения определены для Битрикс',
+	'ARCHIVESITE_MODX_DATA'=>'Каталоги для исключения определены для MODX',
+	'ARCHIVE_FORM_TITLE'=>'Архивация файлов и каталогов',
+	'ARCHIVE_FIELD_exclude'=>'Исключить следующие каталоги (по одному пути на строку)',
+
+	'UPLOAD_FORM_TITLE'=>'Параметры выгрузки архива',
+	'UPLOAD_FIELD_domain'=>'Адрес сайта выгрузки',
+	'UPLOAD_FIELD_ftp_host'=>'Адрес FTP',
+	'UPLOAD_FIELD_ftp_port'=>'Порт FTP',
+	'UPLOAD_FIELD_ftp_login'=>'Логин FTP',
+	'UPLOAD_FIELD_ftp_password'=>'Пароль FTP',
+	'UPLOAD_UPLOAD_TO_FORM_TITLE'=>'Выбран каталог загрузки, пожалуйста нажмите кнопку "Выполнить"',
+
+	'UNPACK_FORM_TITLE'=>'Распаковка архива на сайте',
+	'UNPACK_FIELD_redirect_to_modx_setup'=>'После распаковки открыть окно установки MODX',
+	'UNPACK_FIELD_delete_archive'=>'После распаковки удалить архив с сайтом',
+	'UNPACK_FIELD_auto_create_config'=>'Автоматически сгенерировать файлы конфигурации для MODX',
+
+	'GOTO_TITLE'=>'Всё готово к переходу',
+	'GOTO_TEXT'=>'Мы всё упаковали и выгрузили на новую площадку. Мы готовы к завершению установки!',
+
+	'MODX_SETUP_FORM_TITLE'=>'Установка MODX',
+
+	'UNDUMP_FORM_TITLE'=>'Подключение к БД для распаковки дампа',
+	'UNDUMP_FIELD_login'=>'Имя пользователя',
+	'UNDUMP_FIELD_password'=>'Пароль',
+	'UNDUMP_FIELD_name'=>'Название базы',
+	'UNDUMP_FIELD_host'=>'Хост для подключения',
+
+	'MODXCONFIG_FORM_TITLE'=>'Автоматическая конфигурация MODX без переустановки',
+	'MODXCONFIG_FIELD_login'=>'Имя пользователя',
+	'MODXCONFIG_FIELD_password'=>'Пароль',
+	'MODXCONFIG_FIELD_name'=>'Название базы',
+	'MODXCONFIG_FIELD_host'=>'Хост для подключения',
+	'MODXCONFIG_FIELD_root'=>'Путь к корню сайта',
+
+	'DONE_TITLE'=>'Всё готово!',
+	'DONE_TEXT'=>'Спасибо, все операции выполнены. Не забудьте удалить файл setup.php с сайта. Если нажать кнопку "Далее" система очистит каталоги с кешем и удалит скрипт setup.php',
+
+	'Connection to DB successfull'=>'Успешное соединение с БД',
+	'Dump successfully created: '=>'Дамп базы успешно создан: ',
+	'Archivation available'=>'Архивация доступна',
+	'Error trying mark exclude directories'=>'Ошибка при отметке каталогов для исключения из архива',
+	'Cant mark directory: '=>'Не удалось исключить каталог: ',
+	'Excluded directories marked and ready: <b>'=>'Отмечено для исключения каталогов: <b>',
+	'Site successfully packed: <a href="archive.tar.gz">archive.tar.gz</a>' => 'Сайт успешно упакован: <a href="archive.tar.gz">archive.tar.gz</a>',
+	'Connection available'=>'Соединение доступно',
+	'Redirect to url...'=>'Перенаправление...',
+	'Select'=>'Выбрать',
+	'Upload to selected folder is available'=>'Загрузка в выбранный каталог доступна',
+	'Upload successfull'=>'Загрузка успешно выполнена',
+	'Unpack available'=>'Распаковка доступна',
+	'Redirecting to MODX setup'=>'Перенаправление на установку MODX',
+	'Unpack successfull redirecting to DBUndump'=>'Распаковка успешна, переходим к загрузке дампа базы данных',
+	'Attention! All scripts in iframe is disabled. If you required to use them, please follow link and perform required actions. Then you can continue using setup script. Link: '=>
+		'Внимание! Все скрипты в IFRAME выключены. Если вам требуются скрипты, пожалуйста перейдите по ссылке и выполните процесс установки там. После этого вы сможете продолжить распаковку сайта. Ссылка: ',
+
+);
 
 $obApplication=new Application();
 $obApplication->run();
